@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MAPナビ Ver5.3 - 評価ルート＆音声案内</title>
+  <title>MAPナビ Ver5.4 - 通知距離＆案内済み表示</title>
 
   <link rel="stylesheet" href="leaflet.css" />
   <script src="leaflet.js"></script>
@@ -16,17 +16,20 @@
     #panel {
       position: absolute; top: 10px; left: 10px; z-index: 1000;
       background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 10px;
-      box-shadow: 0 0 5px #888;
-      font-size: 14px;
+      box-shadow: 0 0 5px #888; font-size: 14px;
     }
-    button {
+    button, select, input {
       width: 100%; margin-top: 6px; height: 36px; border-radius: 8px;
-      border: none; background: #0078ff; color: white; font-weight: bold;
+      border: none; font-weight: bold; font-size: 14px;
     }
+    button { background: #0078ff; color: white; }
+    #stopTracking { background: #999; }
+    #voiceTest { background: #00c853; }
     #toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
       background: rgba(0, 0, 0, 0.75); color: #fff; padding: 10px 20px;
       border-radius: 10px; display: none; font-size: 15px; z-index: 2000;
+      white-space: pre-line; text-align: center;
     }
   </style>
 </head>
@@ -34,7 +37,7 @@
 <body>
   <div id="panel">
     <b>📍 GitHubルート選択</b><br>
-    <select id="githubFileSelect" style="width: 100%; height: 32px; border-radius: 8px; margin-top: 4px;">
+    <select id="githubFileSelect">
       <option value="https://raw.githubusercontent.com/knovaera-debug/251110_MAP_NAVIGATION_Ver4/main/data/Final_%E5%9B%BD%E5%86%85DP%E3%82%B3%E3%83%BC%E3%82%B9%E8%A9%95%E4%BE%A1%E3%83%9D%E3%82%A4%E3%83%B3%E3%83%88%E4%BB%98%E3%81%8D_251007_v10.kmz">
         Final_国内DPコース評価ポイント付き_251007_v10.kmz（正式評価用）
       </option>
@@ -42,9 +45,13 @@
         ルートTest.kmz（テスト用）
       </option>
     </select>
+
+    <label>通知半径（m）</label>
+    <input type="number" id="notifyRadius" value="120" min="30" max="500" step="10">
+
     <button id="startTracking">🚗 追跡開始</button>
-    <button id="stopTracking" style="background:#999;">⛔ 停止</button>
-    <button id="voiceTest" style="background:#00c853;">🔊 音声テスト</button>
+    <button id="stopTracking">⛔ 停止</button>
+    <button id="voiceTest">🔊 音声テスト</button>
   </div>
 
   <div id="map"></div>
@@ -81,6 +88,7 @@
     let watchId = null;
     let marker = null;
     let pointData = [];
+    let notifyRadius = 120;
 
     // ====== GitHub KMZ読み込み ======
     async function loadKMZfromGitHub(url, label) {
@@ -106,12 +114,14 @@
             if (feature.geometry.type === 'Point') {
               const name = feature.properties.name || 'ポイント';
               const desc = feature.properties.description || '';
+              const lat = feature.geometry.coordinates[1];
+              const lon = feature.geometry.coordinates[0];
+
               layer.bindPopup(`<b>${name}</b><br>${desc}`);
+
               pointData.push({
-                name: name,
-                desc: desc,
-                lat: feature.geometry.coordinates[1],
-                lon: feature.geometry.coordinates[0],
+                name, desc, lat, lon,
+                marker: layer,
                 notified: false
               });
             }
@@ -139,8 +149,9 @@
         showToast('⚠️ GPSが利用できません');
         return;
       }
-      speak('評価を開始します');
-      showToast('🚗 追跡を開始しました');
+      notifyRadius = parseInt(document.getElementById('notifyRadius').value);
+      speak(`評価を開始します。通知半径は ${notifyRadius} メートルです。`);
+      showToast(`🚗 追跡を開始（通知半径 ${notifyRadius}m）`);
 
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
@@ -166,29 +177,36 @@
       showToast('⛔ 追跡を停止しました');
     }
 
-    // ====== 評価ポイント接近判定（近い順に通知） ======
+    // ====== 評価ポイント接近判定 ======
     function checkProximity(lat, lon) {
       if (!pointData || pointData.length === 0) return;
 
-      const sorted = [...pointData].sort((a, b) => {
-        const da = getDistance(lat, lon, a.lat, a.lon);
-        const db = getDistance(lat, lon, b.lat, b.lon);
-        return da - db;
-      });
+      // 距離を計算して付与
+      const sorted = pointData.map(p => ({
+        ...p,
+        dist: getDistance(lat, lon, p.lat, p.lon)
+      })).sort((a, b) => a.dist - b.dist);
 
+      // ✅ 通知半径内の未通知ポイントを近い順にすべて案内
       for (const p of sorted) {
-        const dist = getDistance(lat, lon, p.lat, p.lon);
-
-        if (dist <= 120 && !p.notified) {
+        if (p.dist <= notifyRadius && !p.notified) {
           const message = `${p.name}。${p.desc}`;
           speak(message);
           showToast(`📍 ${p.name}\n${p.desc}`);
           p.notified = true;
-          break;
+
+          // ✅ マーカー色を青→緑に変更
+          if (p.marker && p.marker.setStyle) {
+            p.marker.setStyle({ color: 'green', fillColor: 'lime' });
+          }
         }
 
-        if (dist >= 200 && p.notified) {
+        // ✅ 通知距離より200m以上離れたら再通知可能＆色を戻す
+        if (p.dist >= notifyRadius + 200 && p.notified) {
           p.notified = false;
+          if (p.marker && p.marker.setStyle) {
+            p.marker.setStyle({ color: 'blue', fillColor: 'cyan' });
+          }
         }
       }
     }
