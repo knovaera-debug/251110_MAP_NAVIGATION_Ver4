@@ -1,244 +1,256 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MAPナビ Ver5.4 - 通知距離＆案内済み表示</title>
-
-  <link rel="stylesheet" href="leaflet.css" />
-  <script src="leaflet.js"></script>
-  <script src="jszip.min.js"></script>
-  <script src="togeojson.umd.js"></script>
-
-  <style>
-    html, body { height: 100%; margin: 0; }
-    #map { height: 100%; width: 100%; }
-    #panel {
-      position: absolute; top: 10px; left: 10px; z-index: 1000;
-      background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 10px;
-      box-shadow: 0 0 5px #888; font-size: 14px;
-    }
-    button, select, input {
-      width: 100%; margin-top: 6px; height: 36px; border-radius: 8px;
-      border: none; font-weight: bold; font-size: 14px;
-    }
-    button { background: #0078ff; color: white; }
-    #stopTracking { background: #999; }
-    #voiceTest { background: #00c853; }
-    #toast {
-      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.75); color: #fff; padding: 10px 20px;
-      border-radius: 10px; display: none; font-size: 15px; z-index: 2000;
-      white-space: pre-line; text-align: center;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>実車評価支援ツール</title>
+<link rel="stylesheet" href="leaflet.css">
+<script src="leaflet.js"></script>
+<script src="jszip.min.js"></script>
+<script src="togeojson.umd.js"></script>
+<style>
+body { margin:0; font-family:'Segoe UI',sans-serif; }
+#map { width:100%; height:100vh; }
+.control-box {
+  position:absolute; top:10px; left:10px; z-index:9999;
+  background:#fff; padding:10px; border-radius:10px;
+  box-shadow:0 2px 6px rgba(0,0,0,0.3);
+  width:90%; max-width:400px;
+}
+button { border:none; border-radius:6px; padding:6px 12px; color:#fff; margin:3px; font-size:15px; }
+#startBtn { background-color:#007b3d; }
+#currentBtn { background-color:#007bff; }
+#menuClose { background-color:gray; }
+#voiceTest { background-color:#00994c; }
+.toast {
+  position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.75); color:#fff; padding:10px 16px;
+  border-radius:8px; z-index:10000; animation:fadeInOut 3s;
+}
+@keyframes fadeInOut {
+  0%{opacity:0;}10%{opacity:1;}90%{opacity:1;}100%{opacity:0;}
+}
+#menuOpen {
+  position:absolute; top:10px; right:10px; z-index:9999;
+  background-color:#007bff; color:white; border:none;
+  padding:8px 12px; border-radius:8px; display:none;
+}
+</style>
 </head>
-
 <body>
-  <div id="panel">
-    <b>📍 GitHubルート選択</b><br>
-    <select id="githubFileSelect">
-      <option value="https://raw.githubusercontent.com/knovaera-debug/251110_MAP_NAVIGATION_Ver4/main/data/Final_%E5%9B%BD%E5%86%85DP%E3%82%B3%E3%83%BC%E3%82%B9%E8%A9%95%E4%BE%A1%E3%83%9D%E3%82%A4%E3%83%B3%E3%83%88%E4%BB%98%E3%81%8D_251007_v10.kmz">
-        Final_国内DPコース評価ポイント付き_251007_v10.kmz（正式評価用）
-      </option>
-      <option value="https://raw.githubusercontent.com/knovaera-debug/251110_MAP_NAVIGATION_Ver4/main/data/%E3%83%AB%E3%83%BC%E3%83%88Test.kmz">
-        ルートTest.kmz（テスト用）
-      </option>
-    </select>
+<div class="control-box" id="menuBox">
+  <h2>実車評価支援ツール</h2>
+  <label>GitHubルート選択：</label>
+  <select id="githubRouteSelect"></select><br><br>
+  <label>通知半径 (m)：</label>
+  <input type="number" id="notifyDistance" value="120" style="width:80px;"> <br><br>
+  <button id="startBtn">追跡開始</button>
+  <button id="currentBtn">現在地へ</button>
+  <button id="voiceTest">音声テスト</button>
+  <button id="menuClose">メニューを閉じる</button>
+  <p id="status">停止中</p>
+</div>
+<button id="menuOpen">⚙ メニューを開く</button>
+<div id="map"></div>
 
-    <label>通知半径（m）</label>
-    <input type="number" id="notifyRadius" value="120" min="30" max="500" step="10">
+<script>
+// ===== 地図初期化 =====
+const map = L.map('map').setView([35.4515, 139.3964], 15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom:19,
+  attribution:'&copy; OpenStreetMap contributors'
+}).addTo(map);
 
-    <button id="startTracking">🚗 追跡開始</button>
-    <button id="stopTracking">⛔ 停止</button>
-    <button id="voiceTest">🔊 音声テスト</button>
-  </div>
+let routeLine=null;
+let currentPoints=[];
+let userMarker=null;
+let watchId=null;
+let lastAnnounced=false;
 
-  <div id="map"></div>
-  <div id="toast"></div>
+// ===== トースト =====
+function showToast(msg){
+  const t=document.createElement("div");
+  t.className="toast"; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3000);
+}
 
-  <script>
-    // ====== トースト表示 ======
-    function showToast(message) {
-      const toast = document.getElementById('toast');
-      toast.textContent = message;
-      toast.style.display = 'block';
-      setTimeout(() => { toast.style.display = 'none'; }, 4000);
-    }
+// ===== 音声 =====
+function speakAsync(text){
+  return new Promise(resolve=>{
+    const uttr=new SpeechSynthesisUtterance(text);
+    uttr.lang="ja-JP"; uttr.pitch=0.9; uttr.rate=0.95; uttr.volume=1.0;
+    uttr.onend=()=>setTimeout(resolve,500); // ← 言い切ってから次へ
+    speechSynthesis.cancel();
+    speechSynthesis.speak(uttr);
+  });
+}
 
-    // ====== 音声出力 ======
-    function speak(text) {
-      speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = 'ja-JP';
-      utter.rate = 1.05;
-      utter.pitch = 1.0;
-      utter.volume = 1.0;
-      speechSynthesis.speak(utter);
-    }
+// ===== 距離計算 =====
+function calcDistance(lat1,lon1,lat2,lon2){
+  const R=6371000;
+  const toRad=x=>x*Math.PI/180;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
 
-    // ====== 地図初期化 ======
-    const map = L.map('map').setView([35.4, 139.4], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+// ===== ルート選択 =====
+const routes=[
+  "data/ルートTest.kmz",
+  "data/Final_国内DPコース評価ポイント付き_251007_v10.kmz"
+];
+const sel=document.getElementById("githubRouteSelect");
+routes.forEach(p=>{
+  const o=document.createElement("option");
+  o.value=p; o.textContent=p.split("/").pop();
+  sel.appendChild(o);
+});
 
-    let currentLayer = null;
-    let watchId = null;
-    let marker = null;
-    let pointData = [];
-    let notifyRadius = 120;
+// ===== KMZロード =====
+async function loadKmzFromGithub(url){
+  showToast("ルート読込中...");
+  const res=await fetch(url);
+  const blob=await res.blob();
+  const zip=await JSZip.loadAsync(blob);
+  const kmlFile=Object.keys(zip.files).find(k=>k.endsWith(".kml"));
+  const kmlText=await zip.file(kmlFile).async("string");
+  const parser=new DOMParser();
+  const kmlDom=parser.parseFromString(kmlText,"text/xml");
 
-    // ====== GitHub KMZ読み込み ======
-    async function loadKMZfromGitHub(url, label) {
-      try {
-        showToast(`📡 ${label} を読み込み中…`);
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error('KMZファイルの取得に失敗しました');
+  // ✅ 「評価ポイント」フォルダを抽出
+  const folders=[...kmlDom.getElementsByTagName("Folder")];
+  const evalFolder=folders.find(f=>{
+    const name=f.getElementsByTagName("name")[0]?.textContent ?? "";
+    return name.includes("評価ポイント");
+  });
 
-        const arrayBuffer = await resp.arrayBuffer();
-        const zip = await JSZip.loadAsync(arrayBuffer);
-        const kmlFile = Object.keys(zip.files).find(name => name.endsWith('.kml'));
-        const kmlText = await zip.files[kmlFile].async('text');
+  const placemarks=evalFolder
+    ? [...evalFolder.getElementsByTagName("Placemark")]
+    : [...kmlDom.getElementsByTagName("Placemark")];
 
-        const parser = new DOMParser();
-        const kml = parser.parseFromString(kmlText, 'text/xml');
-        const geojson = toGeoJSON.kml(kml);
+  if(routeLine) map.removeLayer(routeLine);
+  currentPoints.forEach(p=>map.removeLayer(p.marker));
+  currentPoints=[];
 
-        if (currentLayer) map.removeLayer(currentLayer);
-        pointData = [];
+  // 🔵 評価ポイントプロット
+  placemarks.forEach(pm=>{
+    const name=pm.getElementsByTagName("name")[0]?.textContent?.trim() ?? "";
+    const desc=pm.getElementsByTagName("description")[0]?.textContent?.trim() ?? "";
+    const coords=pm.getElementsByTagName("coordinates")[0]?.textContent?.trim();
+    if(!coords) return;
+    const [lon,lat]=coords.split(",").map(Number);
+    const m=L.circleMarker([lat,lon],{radius:8,color:"black",fillColor:"blue",fillOpacity:0.9}).addTo(map);
+    currentPoints.push({lat,lng:lon,name,desc,marker:m,notified:false});
+  });
 
-        currentLayer = L.geoJSON(geojson, {
-          onEachFeature: (feature, layer) => {
-            if (feature.geometry.type === 'Point') {
-              const name = feature.properties.name || 'ポイント';
-              const desc = feature.properties.description || '';
-              const lat = feature.geometry.coordinates[1];
-              const lon = feature.geometry.coordinates[0];
-
-              layer.bindPopup(`<b>${name}</b><br>${desc}`);
-
-              pointData.push({
-                name, desc, lat, lon,
-                marker: layer,
-                notified: false
-              });
-            }
-          },
-          style: { color: '#FF7F00', weight: 4 },
-          pointToLayer: (feature, latlng) =>
-            L.circleMarker(latlng, {
-              radius: 6, color: 'blue', fillColor: 'cyan', fillOpacity: 0.8
-            })
-        }).addTo(map);
-
-        map.fitBounds(currentLayer.getBounds());
-        showToast(`✅ ${label} を読み込みました`);
-        speak(`${label} のルートを読み込みました`);
-      } catch (err) {
-        console.error(err);
-        showToast(`⚠️ ${label} の読み込みに失敗しました`);
-        speak(`ルートの読み込みに失敗しました`);
-      }
-    }
-
-    // ====== GPS追跡 ======
-    function startTracking() {
-      if (!navigator.geolocation) {
-        showToast('⚠️ GPSが利用できません');
-        return;
-      }
-      notifyRadius = parseInt(document.getElementById('notifyRadius').value);
-      speak(`評価を開始します。通知半径は ${notifyRadius} メートルです。`);
-      showToast(`🚗 追跡を開始（通知半径 ${notifyRadius}m）`);
-
-      watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-          const lat = pos.coords.latitude;
-          const lon = pos.coords.longitude;
-
-          if (marker) marker.setLatLng([lat, lon]);
-          else marker = L.circleMarker([lat, lon], {
-            radius: 8, color: 'red', fillColor: 'red', fillOpacity: 0.9
-          }).addTo(map);
-
-          checkProximity(lat, lon);
-        },
-        (err) => showToast(`GPSエラー: ${err.message}`),
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-      );
-    }
-
-    function stopTracking() {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      speak('評価を終了します');
-      showToast('⛔ 追跡を停止しました');
-    }
-
-    // ====== 評価ポイント接近判定 ======
-    function checkProximity(lat, lon) {
-      if (!pointData || pointData.length === 0) return;
-
-      // 距離を計算して付与
-      const sorted = pointData.map(p => ({
-        ...p,
-        dist: getDistance(lat, lon, p.lat, p.lon)
-      })).sort((a, b) => a.dist - b.dist);
-
-      // ✅ 通知半径内の未通知ポイントを近い順にすべて案内
-      for (const p of sorted) {
-        if (p.dist <= notifyRadius && !p.notified) {
-          const message = `${p.name}。${p.desc}`;
-          speak(message);
-          showToast(`📍 ${p.name}\n${p.desc}`);
-          p.notified = true;
-
-          // ✅ マーカー色を青→緑に変更
-          if (p.marker && p.marker.setStyle) {
-            p.marker.setStyle({ color: 'green', fillColor: 'lime' });
-          }
-        }
-
-        // ✅ 通知距離より200m以上離れたら再通知可能＆色を戻す
-        if (p.dist >= notifyRadius + 200 && p.notified) {
-          p.notified = false;
-          if (p.marker && p.marker.setStyle) {
-            p.marker.setStyle({ color: 'blue', fillColor: 'cyan' });
-          }
-        }
-      }
-    }
-
-    // ====== 距離計算 ======
-    function getDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371000;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2)**2 +
-                Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
-                Math.sin(dLon/2)**2;
-      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    }
-
-    // ====== 初期化 ======
-    document.addEventListener('DOMContentLoaded', () => {
-      const select = document.getElementById('githubFileSelect');
-      const label = select.options[select.selectedIndex].textContent;
-      const url = select.value;
-      loadKMZfromGitHub(url, label);
-
-      select.addEventListener('change', (e) => {
-        const label = e.target.options[e.target.selectedIndex].textContent;
-        const url = e.target.value;
-        loadKMZfromGitHub(url, label);
-      });
-
-      document.getElementById('startTracking').addEventListener('click', startTracking);
-      document.getElementById('stopTracking').addEventListener('click', stopTracking);
-      document.getElementById('voiceTest').addEventListener('click', () => speak('音声テストです。'));
+  // 🟠 ルート線(LineString)描画（通知対象外）
+  const lines=[...kmlDom.getElementsByTagName("LineString")];
+  lines.forEach(line=>{
+    const coords=line.getElementsByTagName("coordinates")[0]?.textContent?.trim() ?? "";
+    if(!coords) return;
+    const latlngs=coords.split(/\s+/).map(c=>{
+      const [lon,lat]=c.split(",").map(Number);
+      return [lat,lon];
     });
-  </script>
+    routeLine=L.polyline(latlngs,{color:"orange",weight:5}).addTo(map);
+  });
+
+  if(routeLine) map.fitBounds(routeLine.getBounds());
+  showToast("ルート読込完了");
+}
+loadKmzFromGithub(sel.value);
+sel.addEventListener("change",()=>loadKmzFromGithub(sel.value));
+
+// ===== 音声テスト =====
+document.getElementById("voiceTest").addEventListener("click",()=>{ speakAsync("音声案内のテストです。"); });
+
+// ===== メニュー閉じる・再表示 =====
+document.getElementById("menuClose").addEventListener("click",()=>{
+  document.getElementById("menuBox").style.display="none";
+  document.getElementById("menuOpen").style.display="block";
+  showToast("メニューを閉じました");
+});
+document.getElementById("menuOpen").addEventListener("click",()=>{
+  document.getElementById("menuBox").style.display="block";
+  document.getElementById("menuOpen").style.display="none";
+});
+
+// ===== 現在地へ =====
+document.getElementById("currentBtn").addEventListener("click",()=>{
+  navigator.geolocation.getCurrentPosition(p=>{
+    map.setView([p.coords.latitude,p.coords.longitude],17);
+  });
+});
+
+// ===== 追跡開始 =====
+document.getElementById("startBtn").addEventListener("click",async()=>{
+  if(watchId){
+    navigator.geolocation.clearWatch(watchId);
+    watchId=null;
+    document.getElementById("status").textContent="停止中";
+    await speakAsync("評価を終了します。お疲れ様でした。");
+    showToast("追跡停止しました");
+    return;
+  }
+
+  const notifyDistance=parseFloat(document.getElementById("notifyDistance").value)||120;
+  await speakAsync("評価を開始します。");
+  document.getElementById("status").textContent="評価中";
+  showToast("追跡を開始します");
+  lastAnnounced=false;
+
+  // ===== 開始時に範囲内ポイントを案内 =====
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const lat=pos.coords.latitude, lon=pos.coords.longitude;
+    const nearby=currentPoints
+      .map(p=>({...p,dist:calcDistance(lat,lon,p.lat,p.lng)}))
+      .filter(p=>p.dist<=notifyDistance)
+      .sort((a,b)=>a.dist-b.dist);
+    for(const np of nearby){
+      const idx=currentPoints.findIndex(x=>x.lat===np.lat&&x.lng===np.lng);
+      if(idx>=0 && !currentPoints[idx].notified){
+        const msg=np.desc?`${np.name}、${np.desc}です`:`${np.name}です`;
+        await speakAsync(msg);
+        showToast(`📍${np.name}（約${Math.round(np.dist)}m）`);
+        currentPoints[idx].notified=true;
+      }
+    }
+  });
+
+  // ===== GPS追跡 =====
+  watchId=navigator.geolocation.watchPosition(async pos=>{
+    const lat=pos.coords.latitude, lon=pos.coords.longitude;
+
+    if(!userMarker){
+      userMarker=L.circleMarker([lat,lon],{radius:8,color:"red",fillColor:"#f03",fillOpacity:0.9}).addTo(map);
+    }else userMarker.setLatLng([lat,lon]);
+
+    let allReached=true;
+    for(const p of currentPoints){
+      if(!p.notified){
+        const dist=calcDistance(lat,lon,p.lat,p.lng);
+        if(dist<=notifyDistance){
+          const msg=p.desc?`${p.name}、${p.desc}です`:`${p.name}です`;
+          await speakAsync(msg);
+          showToast(`📍${p.name}（約${Math.round(dist)}m）`);
+          p.notified=true;
+        }else{
+          allReached=false;
+        }
+      }
+    }
+
+    if(!lastAnnounced && allReached && currentPoints.length>0){
+      lastAnnounced=true;
+      await speakAsync("評価を終了します。お疲れ様でした。");
+      showToast("✅ 評価を終了しました");
+      navigator.geolocation.clearWatch(watchId);
+      watchId=null;
+      document.getElementById("status").textContent="終了";
+    }
+  },err=>showToast("GPSエラー:"+err.message),{enableHighAccuracy:true});
+});
+</script>
 </body>
 </html>
