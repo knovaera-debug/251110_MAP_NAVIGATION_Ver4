@@ -54,7 +54,6 @@ button { border:none; border-radius:6px; padding:6px 12px; color:#fff; margin:3p
 <div id="map"></div>
 
 <script>
-// ===== 地図初期化 =====
 const map = L.map('map').setView([35.4515, 139.3964], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom:19,
@@ -66,16 +65,16 @@ let currentPoints=[];
 let userMarker=null;
 let watchId=null;
 let lastAnnounced=false;
+let lastSpokenName=null;
+let lastSpeakTime=0;
 
-// ===== トースト =====
+// ====== Utility ======
 function showToast(msg){
   const t=document.createElement("div");
   t.className="toast"; t.textContent=msg;
   document.body.appendChild(t);
   setTimeout(()=>t.remove(),3000);
 }
-
-// ===== 音声出力 =====
 function speakAsync(text){
   return new Promise(resolve=>{
     const u=new SpeechSynthesisUtterance(text);
@@ -84,8 +83,6 @@ function speakAsync(text){
     speechSynthesis.cancel(); speechSynthesis.speak(u);
   });
 }
-
-// ===== 距離 =====
 function calcDistance(lat1,lon1,lat2,lon2){
   const R=6371000, toRad=x=>x*Math.PI/180;
   const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
@@ -93,12 +90,19 @@ function calcDistance(lat1,lon1,lat2,lon2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-// ===== ルート一覧 =====
-const routes=["data/ルートTest.kmz","data/Final_国内DPコース評価ポイント付き_251007_v10.kmz"];
+// ====== GitHubルート ======
+const routes=[
+  "data/ルートTest.kmz",
+  "data/Final_国内DPコース評価ポイント付き_251007_v10.kmz"
+];
 const sel=document.getElementById("githubRouteSelect");
-routes.forEach(p=>{const o=document.createElement("option");o.value=p;o.textContent=p.split("/").pop();sel.appendChild(o);});
+routes.forEach(p=>{
+  const o=document.createElement("option");
+  o.value=p; o.textContent=p.split("/").pop();
+  sel.appendChild(o);
+});
 
-// ===== KMZ読込 =====
+// ====== KMZ読込 ======
 async function loadKmzFromGithub(url){
   showToast("ルート読込中...");
   const res=await fetch(url);
@@ -126,10 +130,9 @@ async function loadKmzFromGithub(url){
     if(!coords) return;
     const [lon,lat]=coords.split(",").map(Number);
     const m=L.circleMarker([lat,lon],{radius:8,color:"black",fillColor:"blue",fillOpacity:0.9}).addTo(map);
-    currentPoints.push({lat,lng:lon,name,desc,marker:m,notified:false,lastNotifyTime:0});
+    currentPoints.push({lat,lng:lon,name,desc,marker:m,notified:false});
   });
 
-  // ルート線
   const lines=[...kmlDom.getElementsByTagName("LineString")];
   lines.forEach(line=>{
     const coords=line.getElementsByTagName("coordinates")[0]?.textContent?.trim()??"";
@@ -156,14 +159,6 @@ document.getElementById("menuOpen").addEventListener("click",()=>{
   document.getElementById("menuOpen").style.display="none";
 });
 
-// ===== 音声テスト =====
-document.getElementById("voiceTest").addEventListener("click",()=>{speakAsync("音声案内のテストです。");});
-
-// ===== 現在地へ =====
-document.getElementById("currentBtn").addEventListener("click",()=>{
-  navigator.geolocation.getCurrentPosition(p=>{map.setView([p.coords.latitude,p.coords.longitude],17);});
-});
-
 // ===== 追跡 =====
 document.getElementById("startBtn").addEventListener("click",async()=>{
   if(watchId){
@@ -171,61 +166,63 @@ document.getElementById("startBtn").addEventListener("click",async()=>{
     watchId=null;
     document.getElementById("status").textContent="停止中";
     await speakAsync("評価を終了します。お疲れ様でした。");
-    showToast("追跡停止しました");
     return;
   }
 
   const notifyDistance=parseFloat(document.getElementById("notifyDistance").value)||120;
-  const resetDistance=notifyDistance+30;
+  const resetDistance=notifyDistance+40;
   const lockDuration=15000; // 通知後15秒ロック
 
   await speakAsync("評価を開始します。");
   document.getElementById("status").textContent="評価中";
-  lastAnnounced=false;
+  lastAnnounced=false; lastSpokenName=null;
 
+  // 初期位置案内
   const pos=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{enableHighAccuracy:true}));
   const lat=pos.coords.latitude, lon=pos.coords.longitude;
+  map.setView([lat,lon],17);
 
-  const nearby=currentPoints
-    .map(p=>({...p,dist:calcDistance(lat,lon,p.lat,p.lng)}))
-    .filter(p=>p.dist<=notifyDistance)
-    .sort((a,b)=>a.dist-b.dist);
-
+  const nearby=currentPoints.map(p=>({...p,dist:calcDistance(lat,lon,p.lat,p.lng)}))
+    .filter(p=>p.dist<=notifyDistance).sort((a,b)=>a.dist-b.dist);
   for(const np of nearby){
-    const idx=currentPoints.findIndex(x=>x.lat===np.lat&&x.lng===np.lng);
-    if(idx>=0&&!currentPoints[idx].notified){
+    if(!np.notified){
       const msg=np.desc?`${np.name}、${np.desc}です`:`${np.name}です`;
       await speakAsync(msg);
-      showToast(`📍${np.name}（約${Math.round(np.dist)}m）`);
-      currentPoints[idx].notified=true;
-      currentPoints[idx].lastNotifyTime=Date.now();
+      np.notified=true;
+      np.lastNotifyTime=Date.now();
+      lastSpokenName=np.name;
     }
   }
 
   // GPS追跡
   watchId=navigator.geolocation.watchPosition(async pos=>{
     const lat=pos.coords.latitude, lon=pos.coords.longitude;
-
+    map.setView([lat,lon]); // 自車を中心に
     if(!userMarker){
       userMarker=L.circleMarker([lat,lon],{radius:8,color:"red",fillColor:"#f03",fillOpacity:0.9}).addTo(map);
     } else userMarker.setLatLng([lat,lon]);
 
+    const now=Date.now();
     let allReached=true;
     for(const p of currentPoints){
       const dist=calcDistance(lat,lon,p.lat,p.lng);
-      const now=Date.now();
 
       // 通知条件
-      if(!p.notified && dist<=notifyDistance){
-        const msg=p.desc?`${p.name}、${p.desc}です`:`${p.name}です`;
-        await speakAsync(msg);
-        showToast(`📍${p.name}（約${Math.round(dist)}m）`);
-        p.notified=true;
-        p.lastNotifyTime=now;
+      if(!p.notified && dist<=notifyDistance && (now-lastSpeakTime>lockDuration)){
+        // 同じタイトルを短時間で繰り返さない
+        if(p.name!==lastSpokenName){
+          const msg=p.desc?`${p.name}、${p.desc}です`:`${p.name}です`;
+          await speakAsync(msg);
+          showToast(`📍${p.name}（約${Math.round(dist)}m）`);
+          p.notified=true;
+          p.lastNotifyTime=now;
+          lastSpokenName=p.name;
+          lastSpeakTime=now;
+        }
       }
 
-      // 再通知リセット条件（距離＋時間）
-      if(p.notified && dist>resetDistance && now-p.lastNotifyTime>lockDuration){
+      // 再通知解除条件
+      if(p.notified && dist>resetDistance && (now-p.lastNotifyTime>lockDuration)){
         p.notified=false;
       }
 
@@ -235,7 +232,6 @@ document.getElementById("startBtn").addEventListener("click",async()=>{
     if(!lastAnnounced && allReached && currentPoints.length>0){
       lastAnnounced=true;
       await speakAsync("評価を終了します。お疲れ様でした。");
-      showToast("✅ 評価を終了しました");
       navigator.geolocation.clearWatch(watchId);
       watchId=null;
       document.getElementById("status").textContent="終了";
