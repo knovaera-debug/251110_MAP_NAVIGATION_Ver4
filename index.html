@@ -76,8 +76,9 @@ const RAW_BASE = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/$
 // ===== Leaflet初期化 =====
 const map = L.map('map').setView([35.6812,139.7671],13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
-
 let currentLayer=null;
+let routePoints=[];
+let watchId=null;
 
 // ===== KMZ一覧をGitHubから取得 =====
 async function loadKmzList(){
@@ -154,16 +155,35 @@ function parseAndDisplayKml(kmlText){
   if(currentLayer){map.removeLayer(currentLayer);}
   currentLayer=L.geoJSON(geojson,{
     style:{color:"#ff6600",weight:4},
-    onEachFeature:(f,l)=>{if(f.properties?.name)l.bindPopup(f.properties.name);}
+    onEachFeature:(f,l)=>{
+      if(f.geometry.type==="Point" && f.properties?.name){
+        l.bindPopup(f.properties.name);
+        routePoints.push({name:f.properties.name,coords:[f.geometry.coordinates[1],f.geometry.coordinates[0]]});
+      }
+    }
   }).addTo(map);
   try{map.fitBounds(currentLayer.getBounds());}catch{}
 }
 
-// ===== UI操作 =====
+// ===== 音声案内 =====
+let synth = window.speechSynthesis;
+function speak(text){
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang="ja-JP";
+  u.pitch=1.0;
+  u.rate=1.0;
+  synth.speak(u);
+}
+
+// ===== GPS追跡・通知 =====
 document.getElementById("start").addEventListener("click",()=>{
+  if(routePoints.length===0){alert("ルートを読み込んでください");return;}
   showToast("評価を開始します");
   document.getElementById("recBadge").style.display="flex";
+  speak("評価を開始します");
+  startTracking();
 });
+
 document.getElementById("recenter").addEventListener("click",()=>{
   if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(p=>{
@@ -171,9 +191,46 @@ document.getElementById("recenter").addEventListener("click",()=>{
     });
   }
 });
+
 document.getElementById("cp").addEventListener("click",()=>{
   showToast("チェックポイント登録");
 });
+
+function startTracking(){
+  if(!navigator.geolocation){
+    alert("GPSが利用できません");
+    return;
+  }
+  if(watchId) navigator.geolocation.clearWatch(watchId);
+  watchId = navigator.geolocation.watchPosition(pos=>{
+    const lat=pos.coords.latitude;
+    const lon=pos.coords.longitude;
+    const current=[lat,lon];
+    const meMarker=L.circleMarker(current,{radius:8,color:"red"}).addTo(map);
+    setTimeout(()=>map.removeLayer(meMarker),8000);
+
+    // 近距離ポイントを検出
+    for(const p of routePoints){
+      const dist=getDistance(current,p.coords);
+      if(dist<120 && !p.notified){
+        speak(`${p.name} に近づきました`);
+        showToast(`${p.name} に近づきました`);
+        p.notified=true;
+      }
+    }
+  },err=>{console.warn(err);},{enableHighAccuracy:true});
+}
+
+function getDistance(a,b){
+  const R=6371000;
+  const dLat=(b[0]-a[0])*Math.PI/180;
+  const dLon=(b[1]-a[1])*Math.PI/180;
+  const lat1=a[0]*Math.PI/180;
+  const lat2=b[0]*Math.PI/180;
+  const x=Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  return 2*R*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+
 function showToast(msg){
   const t=document.getElementById("toast");
   t.textContent=msg; t.style.display="block";
