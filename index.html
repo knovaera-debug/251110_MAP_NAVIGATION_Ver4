@@ -80,7 +80,7 @@ function speakAsync(text){
   return new Promise(resolve=>{
     const uttr=new SpeechSynthesisUtterance(text);
     uttr.lang="ja-JP"; uttr.pitch=0.9; uttr.rate=0.95; uttr.volume=1.0;
-    uttr.onend=()=>setTimeout(resolve,500); // 言い切ってから次へ
+    uttr.onend=()=>setTimeout(resolve,400); // 言い切ってから次へ
     speechSynthesis.cancel();
     speechSynthesis.speak(uttr);
   });
@@ -195,6 +195,8 @@ document.getElementById("startBtn").addEventListener("click", async () => {
   }
 
   const notifyDistance = parseFloat(document.getElementById("notifyDistance").value) || 120;
+  const resetDistance = notifyDistance + 30; // 再通知解除距離
+
   await speakAsync("評価を開始します。");
   document.getElementById("status").textContent = "評価中";
   showToast("追跡を開始します");
@@ -235,20 +237,27 @@ document.getElementById("startBtn").addEventListener("click", async () => {
       } else userMarker.setLatLng([lat, lon]);
 
       let allReached = true;
+
       for (const p of currentPoints) {
-        if (!p.notified) {
-          const dist = calcDistance(lat, lon, p.lat, p.lng);
-          if (dist <= notifyDistance) {
-            const msg = p.desc ? `${p.name}、${p.desc}です` : `${p.name}です`;
-            await speakAsync(msg);
-            showToast(`📍${p.name}（約${Math.round(dist)}m）`);
-            p.notified = true;
-          } else {
-            allReached = false;
-          }
+        const dist = calcDistance(lat, lon, p.lat, p.lng);
+
+        // 通知条件
+        if (!p.notified && dist <= notifyDistance) {
+          const msg = p.desc ? `${p.name}、${p.desc}です` : `${p.name}です`;
+          await speakAsync(msg);
+          showToast(`📍${p.name}（約${Math.round(dist)}m）`);
+          p.notified = true;
         }
+
+        // 再通知リセット条件
+        if (p.notified && dist > resetDistance) {
+          p.notified = false;
+        }
+
+        if (!p.notified) allReached = false;
       }
 
+      // 全ポイント終了処理
       if (!lastAnnounced && allReached && currentPoints.length > 0) {
         lastAnnounced = true;
         await speakAsync("評価を終了します。お疲れ様でした。");
