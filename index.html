@@ -54,6 +54,7 @@ button { border:none; border-radius:6px; padding:6px 12px; color:#fff; margin:3p
 <div id="map"></div>
 
 <script>
+// ===== 地図初期化 =====
 const map = L.map('map').setView([35.4515, 139.3964], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom:19,
@@ -68,7 +69,7 @@ let lastAnnounced=false;
 let lastSpokenName=null;
 let lastSpeakTime=0;
 
-// ====== Utility ======
+// ===== ユーティリティ =====
 function showToast(msg){
   const t=document.createElement("div");
   t.className="toast"; t.textContent=msg;
@@ -90,7 +91,7 @@ function calcDistance(lat1,lon1,lat2,lon2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-// ====== GitHubルート ======
+// ===== GitHubルート一覧 =====
 const routes=[
   "data/ルートTest.kmz",
   "data/Final_国内DPコース評価ポイント付き_251007_v10.kmz"
@@ -102,7 +103,7 @@ routes.forEach(p=>{
   sel.appendChild(o);
 });
 
-// ====== KMZ読込 ======
+// ===== KMZ読込 =====
 async function loadKmzFromGithub(url){
   showToast("ルート読込中...");
   const res=await fetch(url);
@@ -124,15 +125,19 @@ async function loadKmzFromGithub(url){
   currentPoints=[];
 
   placemarks.forEach(pm=>{
+    // LineStringはスキップ
+    if(pm.getElementsByTagName("LineString").length>0) return;
+
     const name=pm.getElementsByTagName("name")[0]?.textContent?.trim()??"";
     const desc=pm.getElementsByTagName("description")[0]?.textContent?.trim()??"";
     const coords=pm.getElementsByTagName("coordinates")[0]?.textContent?.trim();
     if(!coords) return;
     const [lon,lat]=coords.split(",").map(Number);
     const m=L.circleMarker([lat,lon],{radius:8,color:"black",fillColor:"blue",fillOpacity:0.9}).addTo(map);
-    currentPoints.push({lat,lng:lon,name,desc,marker:m,notified:false});
+    currentPoints.push({lat,lng:lon,name,desc,marker:m,notified:false,lastNotifyTime:0});
   });
 
+  // ルート線（オレンジ）
   const lines=[...kmlDom.getElementsByTagName("LineString")];
   lines.forEach(line=>{
     const coords=line.getElementsByTagName("coordinates")[0]?.textContent?.trim()??"";
@@ -159,7 +164,7 @@ document.getElementById("menuOpen").addEventListener("click",()=>{
   document.getElementById("menuOpen").style.display="none";
 });
 
-// ===== 追跡 =====
+// ===== 追跡開始 =====
 document.getElementById("startBtn").addEventListener("click",async()=>{
   if(watchId){
     navigator.geolocation.clearWatch(watchId);
@@ -177,11 +182,12 @@ document.getElementById("startBtn").addEventListener("click",async()=>{
   document.getElementById("status").textContent="評価中";
   lastAnnounced=false; lastSpokenName=null;
 
-  // 初期位置案内
+  // 現在位置
   const pos=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{enableHighAccuracy:true}));
   const lat=pos.coords.latitude, lon=pos.coords.longitude;
   map.setView([lat,lon],17);
 
+  // 開始時、近いポイントを案内
   const nearby=currentPoints.map(p=>({...p,dist:calcDistance(lat,lon,p.lat,p.lng)}))
     .filter(p=>p.dist<=notifyDistance).sort((a,b)=>a.dist-b.dist);
   for(const np of nearby){
@@ -197,19 +203,19 @@ document.getElementById("startBtn").addEventListener("click",async()=>{
   // GPS追跡
   watchId=navigator.geolocation.watchPosition(async pos=>{
     const lat=pos.coords.latitude, lon=pos.coords.longitude;
-    map.setView([lat,lon]); // 自車を中心に
+    map.setView([lat,lon]);
     if(!userMarker){
       userMarker=L.circleMarker([lat,lon],{radius:8,color:"red",fillColor:"#f03",fillOpacity:0.9}).addTo(map);
     } else userMarker.setLatLng([lat,lon]);
 
     const now=Date.now();
     let allReached=true;
+
     for(const p of currentPoints){
       const dist=calcDistance(lat,lon,p.lat,p.lng);
 
       // 通知条件
       if(!p.notified && dist<=notifyDistance && (now-lastSpeakTime>lockDuration)){
-        // 同じタイトルを短時間で繰り返さない
         if(p.name!==lastSpokenName){
           const msg=p.desc?`${p.name}、${p.desc}です`:`${p.name}です`;
           await speakAsync(msg);
@@ -221,7 +227,7 @@ document.getElementById("startBtn").addEventListener("click",async()=>{
         }
       }
 
-      // 再通知解除条件
+      // 再通知解除条件（距離+時間）
       if(p.notified && dist>resetDistance && (now-p.lastNotifyTime>lockDuration)){
         p.notified=false;
       }
@@ -229,6 +235,7 @@ document.getElementById("startBtn").addEventListener("click",async()=>{
       if(!p.notified) allReached=false;
     }
 
+    // 全ポイント終了
     if(!lastAnnounced && allReached && currentPoints.length>0){
       lastAnnounced=true;
       await speakAsync("評価を終了します。お疲れ様でした。");
