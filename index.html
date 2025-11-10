@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MAPナビ Ver5 - 評価ルート＆音声案内</title>
+  <title>MAPナビ Ver5.2 - 評価ルート＆音声案内</title>
 
   <link rel="stylesheet" href="leaflet.css" />
   <script src="leaflet.js"></script>
@@ -113,7 +113,7 @@
                 lat: feature.geometry.coordinates[1],
                 lon: feature.geometry.coordinates[0],
                 desc: desc,
-                notified: false // ✅ 通知済みフラグ
+                notified: false
               });
             }
           },
@@ -153,6 +153,7 @@
             radius: 8, color: 'red', fillColor: 'red', fillOpacity: 0.9
           }).addTo(map);
 
+          // ✅ 現在地に最も近いポイントを常にチェック
           checkProximity(lat, lon);
         },
         (err) => showToast(`GPSエラー: ${err.message}`),
@@ -167,24 +168,36 @@
       showToast('⛔ 追跡を停止しました');
     }
 
-    // ====== 評価ポイント接近判定 ======
+    // ====== 評価ポイント接近判定（近い順に通知） ======
     function checkProximity(lat, lon) {
-      for (const p of pointData) {
+      if (!pointData || pointData.length === 0) return;
+
+      // 距離順にソート（近い順）
+      const sorted = [...pointData].sort((a, b) => {
+        const da = getDistance(lat, lon, a.lat, a.lon);
+        const db = getDistance(lat, lon, b.lat, b.lon);
+        return da - db;
+      });
+
+      for (const p of sorted) {
         const dist = getDistance(lat, lon, p.lat, p.lon);
-        if (dist < 120 && !p.notified) {
+
+        // ✅ 距離120m以内かつ未通知 → 案内
+        if (dist <= 120 && !p.notified) {
           speak(`まもなく ${p.name} です。`);
           showToast(`📍 ${p.name} に接近 (${Math.round(dist)}m)`);
-          p.notified = true;  // ✅ 一度通知したら再通知しない
-          break;
+          p.notified = true;
+          break; // 最も近い1つのみ案内
         }
-        // 離れたら再通知許可
-        if (dist > 200 && p.notified) {
+
+        // ✅ 200m以上離れたら再通知を許可
+        if (dist >= 200 && p.notified) {
           p.notified = false;
         }
       }
     }
 
-    // Haversine式距離計算
+    // ====== 距離計算（Haversine式） ======
     function getDistance(lat1, lon1, lat2, lon2) {
       const R = 6371000;
       const dLat = (lat2 - lat1) * Math.PI / 180;
