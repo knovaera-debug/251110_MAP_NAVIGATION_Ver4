@@ -64,20 +64,22 @@
 <div id="toast"></div>
 
 <script>
-const REPO_OWNER = "knovaera-debug"; // ← 自分のGitHubユーザー名
-const REPO_NAME  = "250929_MAP_NAVIGATION_Ver3"; // ← リポジトリ名
-const DATA_PATH  = "data"; // KMZが入っているフォルダ
-const BRANCH     = "main"; // ブランチ名（mainまたはmaster）
+// ===== GitHub設定 =====
+const REPO_OWNER = "knovaera-debug";
+const REPO_NAME  = "251110_MAP_NAVIGATION_Ver4";
+const DATA_PATH  = "data";
+const BRANCH     = "main";
 
 const API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATA_PATH}?ref=${BRANCH}`;
 const RAW_BASE = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${DATA_PATH}/`;
 
+// ===== Leaflet初期化 =====
 const map = L.map('map').setView([35.6812,139.7671],13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 
 let currentLayer=null;
 
-// 🔹 GitHubのdataフォルダ内のKMZ一覧を取得
+// ===== KMZ一覧をGitHubから取得 =====
 async function loadKmzList(){
   try{
     const resp=await fetch(API_URL);
@@ -99,7 +101,7 @@ async function loadKmzList(){
 }
 loadKmzList();
 
-// 🔹 KMZ読込ボタン
+// ===== KMZ読込 =====
 document.getElementById("loadKmz").addEventListener("click",async()=>{
   const sel=document.getElementById("kmzSelect").value;
   if(!sel) return alert("KMZを選択してください");
@@ -121,7 +123,7 @@ async function loadFromUrl(url){
   }
 }
 
-// 🔹 ローカルファイル読込
+// ===== ローカルファイル読込 =====
 document.getElementById("file").addEventListener("change",async(e)=>{
   const file=e.target.files[0];
   if(!file) return;
@@ -157,7 +159,7 @@ function parseAndDisplayKml(kmlText){
   try{map.fitBounds(currentLayer.getBounds());}catch{}
 }
 
-// ---------- UI操作 ----------
+// ===== UI操作 =====
 document.getElementById("start").addEventListener("click",()=>{
   showToast("評価を開始します");
   document.getElementById("recBadge").style.display="flex";
