@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MAPナビ Ver5.2 - 評価ルート＆音声案内</title>
+  <title>MAPナビ Ver5.3 - 評価ルート＆音声案内</title>
 
   <link rel="stylesheet" href="leaflet.css" />
   <script src="leaflet.js"></script>
@@ -56,12 +56,12 @@
       const toast = document.getElementById('toast');
       toast.textContent = message;
       toast.style.display = 'block';
-      setTimeout(() => { toast.style.display = 'none'; }, 3000);
+      setTimeout(() => { toast.style.display = 'none'; }, 4000);
     }
 
     // ====== 音声出力 ======
     function speak(text) {
-      speechSynthesis.cancel(); // 直前の音声をキャンセル
+      speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'ja-JP';
       utter.rate = 1.05;
@@ -98,7 +98,6 @@
         const kml = parser.parseFromString(kmlText, 'text/xml');
         const geojson = toGeoJSON.kml(kml);
 
-        // 既存レイヤー削除
         if (currentLayer) map.removeLayer(currentLayer);
         pointData = [];
 
@@ -110,9 +109,9 @@
               layer.bindPopup(`<b>${name}</b><br>${desc}`);
               pointData.push({
                 name: name,
+                desc: desc,
                 lat: feature.geometry.coordinates[1],
                 lon: feature.geometry.coordinates[0],
-                desc: desc,
                 notified: false
               });
             }
@@ -153,7 +152,6 @@
             radius: 8, color: 'red', fillColor: 'red', fillOpacity: 0.9
           }).addTo(map);
 
-          // ✅ 現在地に最も近いポイントを常にチェック
           checkProximity(lat, lon);
         },
         (err) => showToast(`GPSエラー: ${err.message}`),
@@ -172,7 +170,6 @@
     function checkProximity(lat, lon) {
       if (!pointData || pointData.length === 0) return;
 
-      // 距離順にソート（近い順）
       const sorted = [...pointData].sort((a, b) => {
         const da = getDistance(lat, lon, a.lat, a.lon);
         const db = getDistance(lat, lon, b.lat, b.lon);
@@ -182,22 +179,21 @@
       for (const p of sorted) {
         const dist = getDistance(lat, lon, p.lat, p.lon);
 
-        // ✅ 距離120m以内かつ未通知 → 案内
         if (dist <= 120 && !p.notified) {
-          speak(`まもなく ${p.name} です。`);
-          showToast(`📍 ${p.name} に接近 (${Math.round(dist)}m)`);
+          const message = `${p.name}。${p.desc}`;
+          speak(message);
+          showToast(`📍 ${p.name}\n${p.desc}`);
           p.notified = true;
-          break; // 最も近い1つのみ案内
+          break;
         }
 
-        // ✅ 200m以上離れたら再通知を許可
         if (dist >= 200 && p.notified) {
           p.notified = false;
         }
       }
     }
 
-    // ====== 距離計算（Haversine式） ======
+    // ====== 距離計算 ======
     function getDistance(lat1, lon1, lat2, lon2) {
       const R = 6371000;
       const dLat = (lat2 - lat1) * Math.PI / 180;
