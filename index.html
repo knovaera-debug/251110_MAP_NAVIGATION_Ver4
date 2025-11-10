@@ -61,6 +61,7 @@
 
     // ====== 音声出力 ======
     function speak(text) {
+      speechSynthesis.cancel(); // 直前の音声をキャンセル
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'ja-JP';
       utter.rate = 1.05;
@@ -111,7 +112,8 @@
                 name: name,
                 lat: feature.geometry.coordinates[1],
                 lon: feature.geometry.coordinates[0],
-                desc: desc
+                desc: desc,
+                notified: false // ✅ 通知済みフラグ
               });
             }
           },
@@ -169,10 +171,15 @@
     function checkProximity(lat, lon) {
       for (const p of pointData) {
         const dist = getDistance(lat, lon, p.lat, p.lon);
-        if (dist < 120) {
+        if (dist < 120 && !p.notified) {
           speak(`まもなく ${p.name} です。`);
           showToast(`📍 ${p.name} に接近 (${Math.round(dist)}m)`);
+          p.notified = true;  // ✅ 一度通知したら再通知しない
           break;
+        }
+        // 離れたら再通知許可
+        if (dist > 200 && p.notified) {
+          p.notified = false;
         }
       }
     }
