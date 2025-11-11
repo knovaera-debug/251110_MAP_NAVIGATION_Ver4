@@ -1,6 +1,6 @@
 // ----- Service Worker for Route-Aid -----
 // キャッシュ名のバージョンを上げると、強制的に新SW & 新キャッシュに切替わります。
-const VERSION     = 'v5'; // バージョンを上げました
+const VERSION     = 'v6'; // ★バージョンを上げました
 const APP_CACHE   = `route-aid-app-${VERSION}`;
 const TILE_CACHE  = `route-aid-tiles-${VERSION}`;
 
@@ -20,7 +20,11 @@ const APP_ASSETS = [
   // PWAアイコン（後述の icons/ を使う）
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/icon-1024.png'
+  './icons/icon-1024.png',
+  // ▼▼▼ 以下を追記 ▼▼▼
+  './routes/Final_国内DPコース評価ポイント付き_251007_v10.kmz',
+  './routes/ルートTest.kmz'
+  // ▲▲▲ 追記ここまで ▲▲▲
 ];
 
 // タイルキャッシュの最大枚数（端末容量に合わせて調整）
