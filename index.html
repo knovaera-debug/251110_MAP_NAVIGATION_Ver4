@@ -104,7 +104,7 @@
   <div class="row">
     <input type="file" id="file" accept=".kml,.kmz" multiple />
     <select id="datasetSelect" class="grow">
-      <option value="" disabled selected>（読み込んだルート／ポイントを選択）</option>
+      <option value="" disabled selected>（ルートを選択）</option>
     </select>
     <span id="fname" class="small"></span>
   </div>
@@ -410,6 +410,8 @@
   const trackLine = L.polyline([], {color: '#22c55e', weight: 2, opacity: 0.95, pane: 'trackPane'}).addTo(trackLayer);
   // ▲▲▲ 走行軌跡の線の太さと色を修正 ▲▲▲
 
+  // ▼▼▼ ここからが変更/追加されたブロックです ▼▼▼
+
   /* ==== データセット管理（複数ファイル切替） ==== */
   const datasetMap=new Map();
   let currentKey=null;
@@ -445,10 +447,12 @@
     return out;
   }
 
-  async function loadOneFile(file){
-    const arr=await file.arrayBuffer();
+  /**
+   * KMZ/KMLのArrayBufferをパースしてGeoJSON形式のデータを返す
+   */
+  async function parseKmlData(arr, fileName) {
     let kmlText='';
-    if(/\.kmz$/i.test(file.name)){
+    if(/\.kmz$/i.test(fileName)){
       const zip=await JSZip.loadAsync(arr);
       const kmlEntry = Object.values(zip.files).find(z=>/\.kml$/i.test(z.name));
       if(!kmlEntry) throw new Error('KMZ内にKMLが見つかりません');
@@ -457,8 +461,67 @@
       kmlText = new TextDecoder().decode(arr);
     }
     const parsed = await parseKmlText(kmlText);
-    return {name:file.name, ...parsed};
+    return {name:fileName, ...parsed};
   }
+
+  /**
+   * パースされたデータセットをUI（select要素と地図）に追加する
+   */
+  function addDatasetToUI(ds, key, displayName) {
+    ds.name = displayName; // 表示名をセット
+    datasetMap.set(key, ds);
+    const opt=document.createElement('option');
+    opt.value=key;
+    opt.textContent = displayName;
+    datasetSelect.appendChild(opt);
+    
+    // 最初のルートを自動で選択
+    if(!currentKey){ 
+      datasetSelect.value=key;
+      activateDataset(key);
+    }
+  }
+
+  /**
+   * ページ読み込み時に、アプリに同梱されたルートを自動で読み込む
+   */
+  async function loadBundledRoutes() {
+    // ★ここに同梱したいKMZファイルと表示名を定義します
+    const routesToLoad = [
+      { url: './routes/Final_国内DPコース評価ポイント付き_251007_v10.kmz', name: '国内DPコース v10' },
+      { url: './routes/ルートTest.kmz', name: 'ルートTest' }
+    ];
+
+    // ファイル選択UIを非表示にし、ルート選択をメインにします
+    fileInput.style.display = 'none';
+    fname.style.display = 'none';
+    datasetSelect.style.flexGrow = '1'; // selectを幅いっぱいに
+    
+    toast('標準ルートを読み込み中...', 2000);
+    
+    for (const route of routesToLoad) {
+      try {
+        const response = await fetch(route.url);
+        if (!response.ok) throw new Error(`ファイル取得失敗: ${response.status}`);
+        
+        const arr = await response.arrayBuffer();
+        const ds = await parseKmlData(arr, route.url); // パース (ファイル名は.kmzの判定にのみ使用)
+        
+        const key = route.url; // URLをユニークなキーとして使用
+        addDatasetToUI(ds, key, route.name); // UIに追加
+        
+      } catch(err) {
+        console.error(`Failed to load ${route.name}:`, err);
+        toast(`${route.name}の読込失敗`, 3000);
+      }
+    }
+    toast('標準ルートの読み込み完了', 1500);
+  }
+  
+  // ページの読み込みが完了したら、バンドルされたルートを読み込む
+  document.addEventListener('DOMContentLoaded', loadBundledRoutes);
+
+  // ▲▲▲ 変更/追加ブロックここまで ▲▲▲
 
   function renderDataset(ds){
     clearDataLayers();
@@ -486,32 +549,11 @@
     const ds = datasetMap.get(key);
     if(!ds) return;
     currentKey=key;
-    fname.textContent = ds.name;
+    // fname.textContent = ds.name; // ★ファイル名は不要になったのでコメントアウト
     renderDataset(ds);
     notified.clear();
     distanceTravelledSinceSpeak = 0;
   }
-
-  fileInput.addEventListener('change', async (e)=>{
-    const files = Array.from(e.target.files||[]);
-    if(!files.length) return;
-    toast(`読み込み中…(${files.length}件)`, 1800);
-    for(const f of files){
-      try{
-        const ds = await loadOneFile(f);
-        const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        datasetMap.set(key, ds);
-        const opt=document.createElement('option');
-        opt.value=key; opt.textContent=ds.name;
-        datasetSelect.appendChild(opt);
-        if(!currentKey){ datasetSelect.value=key; activateDataset(key); }
-      }catch(err){
-        console.error(err);
-        toast(`${f.name}: 読み込み失敗（${err.message||err}）`, 3000);
-      }
-    }
-    toast('読み込み完了', 1200);
-  });
 
   /* ==== 近接通知 ==== */
   const RENOTIFY_EVERY_M = 300;
