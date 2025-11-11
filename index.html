@@ -410,8 +410,6 @@
   const trackLine = L.polyline([], {color: '#22c55e', weight: 2, opacity: 0.95, pane: 'trackPane'}).addTo(trackLayer);
   // ▲▲▲ 走行軌跡の線の太さと色を修正 ▲▲▲
 
-  // ▼▼▼ ここからが変更/追加されたブロックです ▼▼▼
-
   /* ==== データセット管理（複数ファイル切替） ==== */
   const datasetMap=new Map();
   let currentKey=null;
@@ -489,7 +487,8 @@
     // ★ここに同梱したいKMZファイルと表示名を定義します
     const routesToLoad = [
       { url: './routes/Final_国内DPコース評価ポイント付き_251007_v10.kmz', name: '国内DPコース v10' },
-      { url: './routes/ルートTest.kmz', name: 'ルートTest' }
+      { url: './routes/ルートTest.kmz', name: 'ルートTest' },
+      { url: './routes/自宅→NTC.kmz', name: '自宅→NTC' } // ★追加
     ];
 
     // ファイル選択UIを非表示にし、ルート選択をメインにします
@@ -521,8 +520,6 @@
   // ページの読み込みが完了したら、バンドルされたルートを読み込む
   document.addEventListener('DOMContentLoaded', loadBundledRoutes);
 
-  // ▲▲▲ 変更/追加ブロックここまで ▲▲▲
-
   function renderDataset(ds){
     clearDataLayers();
     for(const p of ds.points){
@@ -549,7 +546,7 @@
     const ds = datasetMap.get(key);
     if(!ds) return;
     currentKey=key;
-    // fname.textContent = ds.name; // ★ファイル名は不要になったのでコメントアウト
+    // fname.textContent = ds.name; // ファイル名は不要になったのでコメントアウト
     renderDataset(ds);
     notified.clear();
     distanceTravelledSinceSpeak = 0;
