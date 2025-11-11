@@ -1,6 +1,6 @@
 // ----- Service Worker for Route-Aid -----
 // キャッシュ名のバージョンを上げると、強制的に新SW & 新キャッシュに切替わります。
-const VERSION     = 'v6'; // ★バージョンを上げました
+const VERSION     = 'v7'; // ★バージョンを上げました
 const APP_CACHE   = `route-aid-app-${VERSION}`;
 const TILE_CACHE  = `route-aid-tiles-${VERSION}`;
 
@@ -21,9 +21,10 @@ const APP_ASSETS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-1024.png',
-  // ▼▼▼ 以下を追記 ▼▼▼
+  // ▼▼▼ 以下を修正・追記 ▼▼▼
   './routes/Final_国内DPコース評価ポイント付き_251007_v10.kmz',
-  './routes/ルートTest.kmz'
+  './routes/ルートTest.kmz',
+  './routes/自宅→NTC.kmz' // ★追加
   // ▲▲▲ 追記ここまで ▲▲▲
 ];
 
